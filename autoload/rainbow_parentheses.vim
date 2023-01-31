@@ -1,196 +1,72 @@
 "==============================================================================
 "  Description: Rainbow colors for parentheses, based on rainbow_parenthsis.vim
-"               by Martin Krischik and others.
+"               by Martin Krischik, June Gunn and others.
 "==============================================================================
 
-function! s:uniq(list)
-  let ret = []
-  let map = {}
-  for items in a:list
-    let ok = 1
-    for item in filter(copy(items), '!empty(v:val)')
-      if has_key(map, item)
-        let ok = 0
-      endif
-      let map[item] = 1
-    endfor
-    if ok
-      call add(ret, items)
-    endif
-  endfor
-  return ret
+" let s:generation = 0
+
+function! s:GetCurrentBufFileType()
+    return getbufvar(bufnr(bufname('%')), '&filetype')
 endfunction
 
-" Excerpt from https://github.com/junegunn/vim-journal
-" http://stackoverflow.com/questions/27159322/rgb-values-of-the-colors-in-the-ansi-extended-colors-index-17-255
-let s:ansi16 = {
-  \ 0:  '#000000', 1:  '#800000', 2:  '#008000', 3:  '#808000',
-  \ 4:  '#000080', 5:  '#800080', 6:  '#008080', 7:  '#c0c0c0',
-  \ 8:  '#808080', 9:  '#ff0000', 10: '#00ff00', 11: '#ffff00',
-  \ 12: '#0000ff', 13: '#ff00ff', 14: '#00ffff', 15: '#ffffff' }
-function! s:rgb(color)
-  if a:color[0] == '#'
-    let r = str2nr(a:color[1:2], 16)
-    let g = str2nr(a:color[3:4], 16)
-    let b = str2nr(a:color[5:6], 16)
-    return [r, g, b]
-  endif
-
-  let ansi = str2nr(a:color)
-
-  if ansi < 16
-    return s:rgb(s:ansi16[ansi])
-  endif
-
-  if ansi >= 232
-    let v = (ansi - 232) * 10 + 8
-    return [v, v, v]
-  endif
-
-  let r = (ansi - 16) / 36
-  let g = ((ansi - 16) % 36) / 6
-  let b = (ansi - 16) % 6
-
-  return map([r, g, b], 'v:val > 0 ? (55 + v:val * 40) : 0')
+function! s:GetCurrentBufFileExtension()
+    return expand('%:e')
 endfunction
 
-" http://stackoverflow.com/questions/596216/formula-to-determine-brightness-of-rgb-color
-" http://alienryderflex.com/hsp.html
-function! s:brightness_(rgb)
-  let [max, min] = map([max(a:rgb), min(a:rgb)], 'v:val / 255.0')
-  let [r, g, b]  = map(a:rgb, 'v:val / 255.0')
-  if max == min
-    return (max + min) / 2.0
-  endif
-  return sqrt(0.299 * r * r + 0.587 * g * g + 0.114 * b * b)
-endfunction
-
-let s:brightness = {}
-function! s:brightness(color)
-  let color = filter(copy(a:color), '!empty(v:val)')[0]
-  if has_key(s:brightness, color)
-    return s:brightness[color]
-  endif
-  let b = s:brightness_(s:rgb(color))
-  let s:brightness[color] = b
-  return b
+function! s:ExcludeCurrentFileType ()
+    let l:base_single_exclude_fts = get(g:, 'rainbow#base_exclude', [])
+    return index(l:base_single_exclude_fts, s:GetCurrentBufFileType()) > -1
 endfunction
 
 function! s:colors_to_hi(colors)
+  " vint: -ProhibitUnnecessaryDoubleQuote
   return
     \ join(
     \   values(
     \     map(
     \       filter({ 'ctermfg': a:colors[0], 'guifg': a:colors[1] },
     \              '!empty(v:val)'),
-    \       'v:key."=".v:val')), ' ')
+    \       'v:key . "=".v:val')), ' ')
 endfunction
 
-function! s:extract_fg(line)
-  let cterm = matchstr(a:line, 'ctermfg=\zs\S*\ze')
-  let gui   = matchstr(a:line, 'guifg=\zs\S*\ze')
-  return [cterm, gui]
-endfunction
-
-function! s:blacklist()
-  redir => output
-    silent! hi Normal
-  redir END
-  let line  = split(output, '\n')[0]
-  let cterm = matchstr(line, 'ctermbg=\zs\S*\ze')
-  let gui   = matchstr(line, 'guibg=\zs\S*\ze')
-  let blacklist = {}
-  if !empty(cterm) | let blacklist[cterm] = 1 | endif
-  if !empty(gui)   | let blacklist[gui]   = 1 | endif
-  return [blacklist, s:extract_fg(line)]
-endfunction
-
-let s:colors = { 'light': {}, 'dark': {} }
-function! s:extract_colors()
-  if exists('g:colors_name') && has_key(s:colors[&background], g:colors_name)
-    return s:colors[&background][g:colors_name]
-  endif
-  redir => output
-    silent hi
-  redir END
-  let lines = filter(split(output, '\n'), 'v:val =~# "fg" && v:val !~? "links" && v:val !~# "bg"')
-  let colors = s:uniq(reverse(map(lines, 's:extract_fg(v:val)')))
-  let [blacklist, fg] = s:blacklist()
-  for c in get(g:, 'rainbow#blacklist', [])
-    let blacklist[c] = 1
-  endfor
-  let colors = filter(colors,
-        \ '!has_key(blacklist, v:val[0]) && !has_key(blacklist, v:val[1])')
-
-  if !empty(filter(copy(fg), '!empty(v:val)'))
-    let nb = s:brightness(fg)
-    let [first, second] = [[], []]
-    for cpair in colors
-      let b = s:brightness(cpair)
-      let diff = abs(nb - b)
-      if diff <= 0.25
-        call add(first, cpair)
-      elseif diff <= 0.5
-        call add(second, cpair)
-      endif
-    endfor
-    let colors = extend(first, second)
-  endif
-
-  let colors = map(colors, 's:colors_to_hi(v:val)')
-  if exists('g:colors_name')
-    let s:colors[&background][g:colors_name] = colors
-  endif
-  return colors
-endfunction
-
-function! s:show_colors()
-  for level in reverse(range(1, s:max_level))
-    execute 'hi rainbowParensShell'.level
-  endfor
-endfunction
-
-let s:generation = 0
 function! rainbow_parentheses#activate(...)
-  let force = get(a:000, 0, 0)
-  if exists('#rainbow_parentheses') && get(b:, 'rainbow_enabled', -1) == s:generation && !force
-    return
+  let s:max_level = get(g:, 'rainbow#max_level', 16)
+  let l:colors = map(copy(g:rainbow_colors[&background]), 's:colors_to_hi(v:val)')
+
+  if s:ExcludeCurrentFileType()
+      return
+  else
+      let l:single_color = g:rainbow_single_colors[&background][0]
+      let l:single_ctermfg = l:single_color[0]
+      let l:single_guifg = l:single_color[1]
+      execute printf('hi rainbowSingle%d ctermfg=%s guifg=%s', 0, l:single_ctermfg, l:single_guifg)
   endif
 
-  let s:generation += 1
-  let s:max_level = get(g:, 'rainbow#max_level', 16)
-  let colors = exists('g:rainbow#colors') ?
-    \ map(copy(g:rainbow#colors[&bg]), 's:colors_to_hi(v:val)') :
-    \ s:extract_colors()
-
-  for level in range(1, s:max_level)
-    let col = colors[(level - 1) % len(colors)]
-    execute printf('hi rainbowParensShell%d %s', s:max_level - level + 1, col)
+  for l:level in range(1, s:max_level)
+    let l:this_color = l:colors[(l:level - 1) % len(l:colors)]
+    execute printf('hi rainbowParensShell%d %s', s:max_level - l:level + 1, l:this_color)
+    execute printf('hi rainbowSingle%d %s', s:max_level - l:level + 1, l:this_color)
   endfor
-  call s:regions(s:max_level)
 
-  command! -bang -nargs=? -bar RainbowParenthesesColors call s:show_colors()
-  augroup rainbow_parentheses
-    autocmd!
-    autocmd ColorScheme,Syntax * call rainbow_parentheses#activate(1)
-  augroup END
-  let b:rainbow_enabled = s:generation
+  call s:regions(s:max_level)
 endfunction
 
 function! rainbow_parentheses#deactivate()
-  if exists('#rainbow_parentheses')
-    for level in range(1, s:max_level)
+  " if exists('#rainbow_parentheses')
+    for l:level in range(0, s:max_level)
       " FIXME How to cope with changes in rainbow#max_level?
-      silent! execute 'hi clear rainbowParensShell'.level
+      " silent! execute 'hi clear rainbowParensShell'.l:level
+      " silent! execute 'hi clear rainbowSingle'.l:level
       " FIXME buffer-local
-      silent! execute 'syntax clear rainbowParens'.level
+      silent! execute 'syntax clear rainbowParens'.l:level
+      silent! execute 'syntax clear rainbowSingle'.l:level
     endfor
-    augroup rainbow_parentheses
-      autocmd!
-    augroup END
-    augroup! rainbow_parentheses
-    delc RainbowParenthesesColors
-  endif
+    " augroup rainbow_parentheses
+    "   autocmd!
+    " augroup END
+    " augroup! rainbow_parentheses
+    " delc RainbowParenthesesColors
+  " endif
 endfunction
 
 function! rainbow_parentheses#toggle()
@@ -201,15 +77,102 @@ function! rainbow_parentheses#toggle()
   endif
 endfunction
 
+function! s:GetRainbowPairs()
+  let l:ft_pairs = get(g:rainbow_ft_pairs, s:GetCurrentBufFileType(), [])
+  let l:ext_pairs = get(g:rainbow_ext_pairs, s:GetCurrentBufFileExtension(), [])
+  return extend(copy(g:rainbow_pairs), extend(l:ft_pairs, l:ext_pairs))
+endfunction
+
+function! s:GetRainbowIncludes()
+  let l:ft_include = get(g:rainbow_ft_include, s:GetCurrentBufFileType(), [])
+  let l:ext_include = get(g:rainbow_ext_include, s:GetCurrentBufFileExtension(), [])
+  " return join(extend(copy(g:rainbow_include), extend(l:ft_include, l:ext_include)), '\{1}\|') . '\{1}'
+  return join(extend(copy(g:rainbow_include), extend(l:ft_include, l:ext_include)), '\|')
+  " let l:include = join(extend(l:ext_include, copy(g:rainbow_include)), '\{1}\|')
+  " let l:include = join(extend(g:rainbow_include, l:ext_include), '\{1}\|') . '\{1}'
+  " let l:include = join(extend(l:ext_include, extend(l:ft_include, g:rainbow_include)), '\{1}\|')
+
+  " let l:include = join(get(g:, 'rainbow#include', [';', ':', '=', ',']), '\{1}\|')
+endfunction
+
+function! GetCurrentBufferId()
+  let l:buf_info = getbufinfo('%')[0]
+  return l:buf_info['bufnr'] . ' ' . l:buf_info['name']
+endfunction
+
+function! ShouldTurnOnRainbowParens()
+  if getfsize(expand('%')) > g:rainbow_max_file_size
+    return v:false
+  elseif index(g:rainbow_ignore_fts, s:GetCurrentBufFileType()) > -1
+    return v:false
+  endif
+
+  return v:true
+endfunction
+
+function! s:debug(msg_type, buf_id)
+    if a:msg_type ==# "init"
+      let l:msg = printf("Init rainbow parens in buffer: %s", a:buf_id)
+    elseif a:msg_type ==# "deactivate"
+      let l:msg = printf("Deactivating rainbow parens in buffer: %s", a:buf_id)
+    elseif a:msg_type ==# "skip"
+      let l:msg = printf("Skipping rainbow parens in buffer: %s", a:buf_id)
+    elseif a:msg_type ==# "remove_from_state"
+      let l:msg = printf("Removing buffer from rainbow parens state: %s", a:buf_id)
+    endif
+
+    call insert(g:rainbow_debug_msg, l:msg, 0)
+endfunction
+
 function! s:regions(max)
-  let pairs = get(g:, 'rainbow#pairs', [['(',')']])
-  for level in range(1, a:max)
-    let cmd = 'syntax region rainbowParens%d matchgroup=rainbowParensShell%d start=/%s/ end=/%s/ contains=%s'
-    let children = extend(['TOP'], map(range(level, a:max), '"rainbowParens".v:val'))
-    for pair in pairs
-      let [open, close] = map(copy(pair), 'escape(v:val, "[]/")')
-      execute printf(cmd, level, level, open, close, join(children, ','))
+  let l:buf_id = GetCurrentBufferId()
+  let l:buffer_state = get(g:rainbow_state, l:buf_id, v:null)
+
+  if l:buffer_state != v:null
+    call s:debug("skip", l:buf_id)
+    return
+  else
+    if ShouldTurnOnRainbowParens()
+      let g:rainbow_state[l:buf_id] = v:true
+      call s:debug("init", l:buf_id)
+    else
+      let g:rainbow_state[l:buf_id] = v:false
+      call s:debug("deactivate", l:buf_id)
+      return
+    endif
+  endif
+
+  let l:pairs = s:GetRainbowPairs()
+  let l:include = s:GetRainbowIncludes()
+
+  " Match base includes
+  let l:base_include_cmd = 'syntax match rainbowSingle%d /%s/'
+  execute printf(l:base_include_cmd, 0, l:include)
+
+  for l:level in range(1, a:max)
+    let l:include_cmd = 'syntax match rainbowSingle%d /%s/ contained containedin=rainbowParens%d'
+    execute printf(l:include_cmd, l:level, l:include, l:level)
+
+    let l:cmd = 'syntax region rainbowParens%d matchgroup=rainbowParensShell%d start=/%s/ end=/%s/ contains=%s'
+
+    " vint: -ProhibitUnnecessaryDoubleQuote
+    let l:children = extend(['TOP'], map(range(l:level, a:max), '"rainbowParens".v:val'))
+    for l:pair in l:pairs
+      " vint: -ProhibitUnnecessaryDoubleQuote
+      let [l:open, l:close] = map(copy(l:pair), 'escape(v:val, "[]/")')
+      execute printf(l:cmd, l:level, l:level, l:open, l:close, join(l:children, ','))
     endfor
   endfor
 endfunction
 
+function! rainbow_parentheses#UpdateStateOnBufferDeleted()
+    try
+        let l:buf_id = GetCurrentBufferId()
+        call remove(g:rainbow_state, l:buf_id)
+        call s:debug("remove_from_state", l:buf_id)
+    catch /E716/
+        " pass
+    endtry
+endfunction
+
+" vim: set sw=2
