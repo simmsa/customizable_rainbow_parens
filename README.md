@@ -11,7 +11,7 @@ A heavily-rewritten fork of [kien/rainbow_parentheses.vim][k].
 Using [vim-plug](https://github.com/junegunn/vim-plug):
 
 ```vim
-Plug 'junegunn/rainbow_parentheses.vim'
+Plug 'simmsa/customizable_rainbow_parentheses.vim'
 ```
 
 ## Commands
